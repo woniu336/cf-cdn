@@ -34,18 +34,18 @@ install_nginx() {
 download_config_files() {
     echo -e "${BLUE}下载配置文件模板...${NC}"
     
-    # 创建配置目录
+    # 创建模板目录和配置目录
+    mkdir -p /etc/nginx/templates/
     mkdir -p /etc/nginx/conf.d/
     
-    # 下载配置文件
-    curl -sS -o /etc/nginx/conf.d/111.com.conf https://raw.githubusercontent.com/woniu336/cf-cdn/main/111.com.conf
-    curl -sS -o /etc/nginx/conf.d/proxy_common.conf https://raw.githubusercontent.com/woniu336/cf-cdn/main/proxy_common.conf
+    # 下载配置文件到模板目录
+    curl -sS -o /etc/nginx/templates/111.com.conf https://raw.githubusercontent.com/woniu336/cf-cdn/main/111.com.conf
+    curl -sS -o /etc/nginx/templates/proxy_common.conf https://raw.githubusercontent.com/woniu336/cf-cdn/main/proxy_common.conf
     
     if [ $? -eq 0 ]; then
         echo -e "${GREEN}配置文件下载成功${NC}"
         # 设置适当的权限
-        chmod 644 /etc/nginx/conf.d/111.com.conf
-        chmod 644 /etc/nginx/conf.d/proxy_common.conf
+        chmod 644 /etc/nginx/templates/*.conf
     else
         echo -e "${RED}配置文件下载失败${NC}"
         exit 1
@@ -87,6 +87,20 @@ copy_certs() {
     echo -e "${GREEN}证书已复制并设置权限${NC}"
 }
 
+# 检查 Nginx 配置
+check_nginx_config() {
+    echo -e "${BLUE}检查 Nginx 配置...${NC}"
+    nginx -t
+    
+    if [ $? -eq 0 ]; then
+        echo -e "${GREEN}Nginx 配置检查通过${NC}"
+        return 0
+    else
+        echo -e "${RED}Nginx 配置检查失败${NC}"
+        return 1
+    fi
+}
+
 # 配置新站点
 configure_site() {
     local main_domain=$1
@@ -95,27 +109,35 @@ configure_site() {
     
     echo -e "${BLUE}配置新站点...${NC}"
     
+    # 创建站点专用目录
+    mkdir -p "/etc/nginx/conf.d/sites/${main_domain}"
+    
     # 创建站点专用的 proxy_common 配置
-    cp /etc/nginx/conf.d/proxy_common.conf "/etc/nginx/conf.d/proxy_common_${main_domain}.conf"
+    cp /etc/nginx/templates/proxy_common.conf "/etc/nginx/conf.d/sites/${main_domain}/proxy_common.conf"
     
     # 修改站点专用的 proxy_common 配置
-    sed -i "s/333.com/$backend_domain/g" "/etc/nginx/conf.d/proxy_common_${main_domain}.conf"
+    sed -i "s/333.com/$backend_domain/g" "/etc/nginx/conf.d/sites/${main_domain}/proxy_common.conf"
     
     # 复制并修改主配置文件
-    cp /etc/nginx/conf.d/111.com.conf "/etc/nginx/conf.d/${main_domain}.conf"
+    cp /etc/nginx/templates/111.com.conf "/etc/nginx/conf.d/${main_domain}.conf"
     
     # 替换域名
     sed -i "s/111.com/$main_domain/g" "/etc/nginx/conf.d/${main_domain}.conf"
     sed -i "s/222.com/$line_domain/g" "/etc/nginx/conf.d/${main_domain}.conf"
     sed -i "s/333.com/$backend_domain/g" "/etc/nginx/conf.d/${main_domain}.conf"
     
-    # 修改 include 语句，使用站点专用的 proxy_common 配置
-    sed -i "s/proxy_common.conf/proxy_common_${main_domain}.conf/g" "/etc/nginx/conf.d/${main_domain}.conf"
+    # 修改 include 语句，使用站点专用目录下的 proxy_common 配置
+    sed -i "s|include /etc/nginx/conf.d/proxy_common.conf|include /etc/nginx/conf.d/sites/${main_domain}/proxy_common.conf|g" "/etc/nginx/conf.d/${main_domain}.conf"
     
-    echo -e "${GREEN}站点配置完成${NC}"
-    echo -e "${BLUE}已创建以下配置文件：${NC}"
-    echo -e "1. /etc/nginx/conf.d/${main_domain}.conf"
-    echo -e "2. /etc/nginx/conf.d/proxy_common_${main_domain}.conf"
+    # 添加配置检查
+    if check_nginx_config; then
+        echo -e "${GREEN}站点配置完成${NC}"
+        echo -e "${BLUE}已创建以下配置文件：${NC}"
+        echo -e "1. /etc/nginx/conf.d/${main_domain}.conf"
+        echo -e "2. /etc/nginx/conf.d/sites/${main_domain}/proxy_common.conf"
+    else
+        echo -e "${RED}配置有误，请检查配置文件${NC}"
+    fi
 }
 
 # 重启 Nginx
